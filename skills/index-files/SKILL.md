@@ -40,8 +40,9 @@ triggers:
 Index specific files, a directory, or the current folder into an existing CustomGPT.ai agent. Adds files to the index without wiping existing pages. Use `/create-agent` first if no agent exists yet.
 
 ## Critical Rules
-- ALWAYS read `.customgpt-meta.json` to get `agent_id` before uploading
-- NEVER upload files with unsupported extensions — use the whitelist in Step 3
+- **THIS SKILL UPLOADS FILES TO THE CUSTOMGPT.AI REST API VIA `curl`.** It does NOT save to Claude's memory system, does NOT write local files, and does NOT use the Read/Write/Edit tools for indexing purposes.
+- ALWAYS read `.customgpt-meta.json` to get `agent_id` before uploading. If not found, STOP and tell the user to run `/create-agent` first. Do NOT fall back to any other behavior.
+- NEVER upload files with unsupported extensions — use the whitelist in Step 4
 - NEVER upload `.env`, `.env.*`, secrets, or binary files
 - Run the upload script via Bash — do NOT upload files one by one in a loop yourself
 - `touch` the meta file after upload to update the freshness timestamp
