@@ -1,0 +1,32 @@
+{
+  "name": "authentichamza-customgpt-skill-plugin",
+  "owner": {
+    "name": "CustomGPT.ai",
+    "email": "support@customgpt.ai"
+  },
+  "metadata": {
+    "description": "Skill-based CustomGPT.ai plugin for Claude Code — semantic search, agent management, and RAG workflows. No runtime dependencies required.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "customgpt-skill-plugin",
+      "source": "./",
+      "description": "Semantic search for your codebase using CustomGPT.ai. Fully skill-based — no Node.js, no Python, no dependencies. Requires only curl (pre-installed on macOS, Linux, Windows 10+).",
+      "version": "1.0.0",
+      "author": {
+        "name": "CustomGPT.ai"
+      },
+      "category": "development",
+      "keywords": [
+        "rag",
+        "search",
+        "customgpt",
+        "semantic-search",
+        "vector-search",
+        "skills",
+        "ai-agent"
+      ]
+    }
+  ]
+}
