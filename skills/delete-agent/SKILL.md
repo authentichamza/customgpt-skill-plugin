@@ -12,10 +12,25 @@ Permanently delete a CustomGPT.ai agent and remove its local meta file.
 ## Step 1 — Get API Key
 
 ```bash
+# 1. Already-exported env var
+echo "${CUSTOMGPT_API_KEY:-}"
+
+# 2. .env file in current or parent directories
+dir="$PWD"
+while [ "$dir" != "/" ]; do
+  if [ -f "$dir/.env" ]; then
+    grep -E '^export\s+CUSTOMGPT_API_KEY=|^CUSTOMGPT_API_KEY=' "$dir/.env" \
+      | sed 's/^export\s*//' | sed 's/CUSTOMGPT_API_KEY=//' | tr -d '"'"'" | head -1
+    break
+  fi
+  dir=$(dirname "$dir")
+done
+
+# 3. Saved config file
 cat ~/.claude/customgpt-config.json 2>/dev/null
 ```
 
-Use field `apiKey`, or env var `CUSTOMGPT_API_KEY`. If missing, ask the user for it.
+Priority: env var → `.env` file → saved config. Use the first non-empty value found as `$API_KEY`. If missing, ask the user for it.
 
 ---
 

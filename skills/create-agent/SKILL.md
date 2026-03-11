@@ -13,16 +13,33 @@ Create a CustomGPT.ai agent for a local folder and index its files into it.
 ## Step 1 — Get API Key
 
 Check in this order:
-1. Environment variable `CUSTOMGPT_API_KEY`
-2. File `~/.claude/customgpt-config.json` → field `apiKey`
 
-Read the config file with:
 ```bash
+# 1. Already-exported env var
+echo "${CUSTOMGPT_API_KEY:-}"
+
+# 2. .env file in current or parent directories
+dir="$PWD"
+while [ "$dir" != "/" ]; do
+  if [ -f "$dir/.env" ]; then
+    grep -E '^export\s+CUSTOMGPT_API_KEY=|^CUSTOMGPT_API_KEY=' "$dir/.env" \
+      | sed 's/^export\s*//' | sed 's/CUSTOMGPT_API_KEY=//' | tr -d '"'"'" | head -1
+    break
+  fi
+  dir=$(dirname "$dir")
+done
+
+# 3. Saved config file
 cat ~/.claude/customgpt-config.json 2>/dev/null
 ```
 
-If no key is found, ask the user:
+Priority: env var → `.env` file → saved config. Use the first non-empty value found as `$API_KEY`.
+
+If no key is found anywhere, ask the user:
 > "Please provide your CustomGPT.ai API key. You can find it at https://app.customgpt.ai/profile#api-keys"
+>
+> "You can also set it permanently by adding this to your shell profile or a `.env` file in your project:
+> `export CUSTOMGPT_API_KEY=your_key_here`"
 
 Once you have the key, save it for future use:
 ```bash
