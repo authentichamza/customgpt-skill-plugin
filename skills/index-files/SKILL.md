@@ -1,3 +1,40 @@
+---
+name: index-files
+description: Index specific files or a directory into an existing CustomGPT.ai agent for RAG search. Supports explicit file lists, directory paths, or the current folder. Respects file extension whitelist and exclusion rules.
+triggers:
+  - "index"
+  - "index the"
+  - "index this"
+  - "index these"
+  - "index just"
+  - "index only"
+  - "index overview"
+  - "index troubleshooting"
+  - "index the overview"
+  - "index the troubleshooting"
+  - "index these files"
+  - "index this file"
+  - "index this folder"
+  - "index this directory"
+  - "index this project"
+  - "index this repo"
+  - "index the files"
+  - "index the folder"
+  - "index the directory"
+  - "index the project"
+  - "index the repo"
+  - "add to the index"
+  - "add these files to"
+  - "add this file to"
+  - "add to index"
+  - "upload to the agent"
+  - "upload these files"
+  - "upload to customgpt"
+  - "re-index"
+  - "reindex"
+  - "index and"
+---
+
 # index-files
 
 Index specific files, a directory, or the current folder into an existing CustomGPT.ai agent. Adds files to the index without wiping existing pages. Use `/create-agent` first if no agent exists yet.
