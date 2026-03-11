@@ -37,11 +37,11 @@ triggers:
 
 # index-files
 
-Index specific files, a directory, or the current folder into an existing CustomGPT.ai agent. Adds files to the index without wiping existing pages. Use `/create-agent` first if no agent exists yet.
+Index specific files, a directory, or the current folder into a CustomGPT.ai agent. If no agent exists yet, automatically creates one named after the current folder before indexing. Adds files to the index without wiping existing pages.
 
 ## Critical Rules
 - **THIS SKILL UPLOADS FILES TO THE CUSTOMGPT.AI REST API VIA `curl`.** It does NOT save to Claude's memory system, does NOT write local files, and does NOT use the Read/Write/Edit tools for indexing purposes.
-- ALWAYS read `.customgpt-meta.json` to get `agent_id` before uploading. If not found, STOP and tell the user to run `/create-agent` first. Do NOT fall back to any other behavior.
+- If `.customgpt-meta.json` is not found, **auto-create the agent** (Step 2b) — do NOT stop, do NOT tell the user to run another skill.
 - NEVER upload files with unsupported extensions — use the whitelist in Step 4
 - NEVER upload `.env`, `.env.*`, secrets, or binary files
 - Run the upload script via Bash — do NOT upload files one by one in a loop yourself
@@ -69,7 +69,9 @@ mkdir -p ~/.claude && echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.
 
 ---
 
-## Step 2 — Read Meta File
+## Step 2 — Find or Create Agent
+
+### Step 2a — Look for existing meta file
 
 Walk up from the current directory to find `.customgpt-meta.json`:
 ```bash
@@ -80,8 +82,46 @@ while [ "$dir" != "/" ]; do
 done
 ```
 
-Extract `agent_id` and `indexed_folder`. If not found:
-> "No agent found in this directory tree. Run `/create-agent` first."
+If found, extract `agent_id` and `indexed_folder`, then skip to Step 3.
+
+### Step 2b — No meta file found: auto-create the agent
+
+Inform the user:
+> "No agent found for this project. Creating one now..."
+
+Determine the project folder: use the Git root if available, otherwise `$PWD`:
+```bash
+git rev-parse --show-toplevel 2>/dev/null || echo "$PWD"
+```
+
+The agent name is the folder's basename:
+```bash
+basename "$PROJECT_FOLDER"
+```
+
+Create the agent:
+```bash
+curl -s -X POST "https://app.customgpt.ai/api/v1/projects" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "project_name=$(basename $PROJECT_FOLDER)&is_chat_active=1"
+```
+
+Extract `data.id` from the response — this is the `agent_id`. If the response has no `data.id`, show the error and stop.
+
+Save `.customgpt-meta.json` to the project folder:
+```bash
+cat > "$PROJECT_FOLDER/.customgpt-meta.json" << EOF
+{
+  "agent_id": $AGENT_ID,
+  "agent_name": "$(basename $PROJECT_FOLDER)",
+  "indexed_folder": "$PROJECT_FOLDER",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+```
+
+Set `indexed_folder` = `$PROJECT_FOLDER` and continue to Step 3.
 
 ---
 
