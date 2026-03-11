@@ -1,0 +1,198 @@
+# index-files
+
+Index specific files, a directory, or the current folder into an existing CustomGPT.ai agent. Adds files to the index without wiping existing pages. Use `/create-agent` first if no agent exists yet.
+
+## Critical Rules
+- ALWAYS read `.customgpt-meta.json` to get `agent_id` before uploading
+- NEVER upload files with unsupported extensions — use the whitelist in Step 3
+- NEVER upload `.env`, `.env.*`, secrets, or binary files
+- Run the upload script via Bash — do NOT upload files one by one in a loop yourself
+- `touch` the meta file after upload to update the freshness timestamp
+
+---
+
+## Step 1 — Get API Key
+
+Check in this order:
+1. Environment variable `CUSTOMGPT_API_KEY`
+2. File `~/.claude/customgpt-config.json` → field `apiKey`
+
+```bash
+cat ~/.claude/customgpt-config.json 2>/dev/null
+```
+
+If no key is found, ask the user:
+> "Please provide your CustomGPT.ai API key. You can find it at https://app.customgpt.ai/profile#api-keys"
+
+Once you have the key, save it:
+```bash
+mkdir -p ~/.claude && echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.json
+```
+
+---
+
+## Step 2 — Read Meta File
+
+Walk up from the current directory to find `.customgpt-meta.json`:
+```bash
+dir="$PWD"
+while [ "$dir" != "/" ]; do
+  [ -f "$dir/.customgpt-meta.json" ] && cat "$dir/.customgpt-meta.json" && break
+  dir=$(dirname "$dir")
+done
+```
+
+Extract `agent_id` and `indexed_folder`. If not found:
+> "No agent found in this directory tree. Run `/create-agent` first."
+
+---
+
+## Step 3 — Resolve What to Index
+
+**If the user specified files or directories**, resolve each to an absolute path:
+```bash
+realpath "$TARGET" 2>/dev/null || echo "not found"
+```
+
+For each path:
+- If it is a **file**: include it directly if its extension is in the whitelist below.
+- If it is a **directory**: collect eligible files from it recursively (Step 4).
+
+**If no paths were specified**, use the current working directory as the target directory.
+
+### Supported Extensions (Whitelist)
+
+Only index files with these extensions:
+
+**Code:**
+`.js` `.ts` `.tsx` `.jsx` `.mjs` `.cjs`
+`.py` `.go` `.rb` `.java` `.cs` `.cpp` `.c` `.h` `.hpp`
+`.rs` `.swift` `.kt` `.php` `.scala` `.r` `.m`
+`.sh` `.bash` `.zsh` `.fish`
+`.html` `.htm` `.css` `.scss` `.sass` `.less`
+`.sql` `.graphql` `.proto`
+
+**Config / Data:**
+`.json` `.jsonc` `.yaml` `.yml` `.toml` `.xml` `.ini` `.cfg` `.conf` `.env.example`
+
+**Docs / Text:**
+`.md` `.mdx` `.rst` `.txt` `.csv` `.tsv`
+
+**Documents:**
+`.pdf` `.docx` `.xlsx` `.pptx`
+
+---
+
+## Step 4 — Collect Eligible Files
+
+For each **directory** target, collect files with the supported extensions:
+
+```bash
+find "$TARGET_DIR" -type f \
+  -not -path "*/.git/*" \
+  -not -path "*/node_modules/*" \
+  -not -path "*/__pycache__/*" \
+  -not -path "*/.next/*" \
+  -not -path "*/dist/*" \
+  -not -path "*/build/*" \
+  -not -path "*/.cache/*" \
+  -not -path "*/vendor/*" \
+  -not -path "*/coverage/*" \
+  -not -path "*/.venv/*" \
+  -not -path "*/venv/*" \
+  \( \
+    -name "*.js"   -o -name "*.ts"   -o -name "*.tsx"  -o -name "*.jsx"  \
+    -o -name "*.mjs"  -o -name "*.cjs" \
+    -o -name "*.py"   -o -name "*.go"   -o -name "*.rb"   -o -name "*.java" \
+    -o -name "*.cs"   -o -name "*.cpp"  -o -name "*.c"    -o -name "*.h"   \
+    -o -name "*.hpp"  -o -name "*.rs"   -o -name "*.swift" -o -name "*.kt" \
+    -o -name "*.php"  -o -name "*.scala" -o -name "*.r"   -o -name "*.m"   \
+    -o -name "*.sh"   -o -name "*.bash" -o -name "*.zsh"  -o -name "*.fish" \
+    -o -name "*.html" -o -name "*.htm"  -o -name "*.css"  -o -name "*.scss" \
+    -o -name "*.sass" -o -name "*.less" -o -name "*.sql"  -o -name "*.graphql" \
+    -o -name "*.proto" \
+    -o -name "*.json" -o -name "*.jsonc" -o -name "*.yaml" -o -name "*.yml" \
+    -o -name "*.toml" -o -name "*.xml"  -o -name "*.ini"  -o -name "*.cfg" \
+    -o -name "*.conf" -o -name "*.env.example" \
+    -o -name "*.md"   -o -name "*.mdx"  -o -name "*.rst"  -o -name "*.txt" \
+    -o -name "*.csv"  -o -name "*.tsv" \
+    -o -name "*.pdf"  -o -name "*.docx" -o -name "*.xlsx" -o -name "*.pptx" \
+  \) \
+  > /tmp/customgpt-files.txt
+
+wc -l < /tmp/customgpt-files.txt
+```
+
+For **individual files** passed directly, write their paths into `/tmp/customgpt-files.txt` instead (after verifying extension is in whitelist).
+
+Tell the user how many files will be uploaded before proceeding.
+
+---
+
+## Step 5 — Upload Files
+
+```bash
+cat > /tmp/customgpt-upload.sh << 'UPLOAD_EOF'
+#!/bin/bash
+API_KEY="__API_KEY__"
+AGENT_ID="__AGENT_ID__"
+BASE_DIR="__BASE_DIR__"
+UPLOADED=0
+FAILED=0
+TOTAL=$(wc -l < /tmp/customgpt-files.txt)
+
+while IFS= read -r FILE; do
+  [ -z "$FILE" ] && continue
+
+  REL="${FILE#${BASE_DIR}/}"
+  HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
+    -H "Authorization: Bearer ${API_KEY}" \
+    -F "file=@${FILE};filename=${REL}")
+
+  if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
+    UPLOADED=$((UPLOADED + 1))
+    echo "OK [$UPLOADED/$TOTAL]: $REL"
+  else
+    FAILED=$((FAILED + 1))
+    echo "FAILED [$HTTP]: $REL" >&2
+  fi
+done < /tmp/customgpt-files.txt
+
+echo ""
+echo "Done — uploaded: $UPLOADED / $TOTAL, failed: $FAILED"
+UPLOAD_EOF
+
+sed -i "s|__API_KEY__|$API_KEY|g"     /tmp/customgpt-upload.sh
+sed -i "s|__AGENT_ID__|$AGENT_ID|g"   /tmp/customgpt-upload.sh
+sed -i "s|__BASE_DIR__|$BASE_DIR|g"   /tmp/customgpt-upload.sh
+
+chmod +x /tmp/customgpt-upload.sh
+bash /tmp/customgpt-upload.sh
+```
+
+`$BASE_DIR` should be set to `indexed_folder` from the meta file (used to compute relative paths). If the files being indexed live outside that folder, use their common parent directory instead.
+
+---
+
+## Step 6 — Update Freshness Timestamp
+
+```bash
+touch "$META_FILE_PATH"
+```
+
+Where `$META_FILE_PATH` is the full path to the `.customgpt-meta.json` file that was found in Step 2.
+
+---
+
+## Step 7 — Report
+
+> "Indexed N file(s) into agent {agent_id}.
+>
+> - Uploaded: {N}
+> - Failed: {F}
+>
+> Use `/query-agent` to search the updated index, or `/refresh-agent` to do a full re-sync."
+
+If `FAILED > 0`, suggest:
+> "Some files failed. Check that your API key is valid (`cat ~/.claude/customgpt-config.json`) and that your plan has capacity."
