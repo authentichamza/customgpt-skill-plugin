@@ -6,44 +6,22 @@ Create a CustomGPT.ai agent for a local folder and index its files into it.
 - NEVER skip the API key check
 - ALWAYS save `.customgpt-meta.json` before reporting success
 - NEVER index `.git/`, `node_modules/`, `__pycache__/`, binary files, or `.env` files
-- Run the upload script via Bash — do NOT upload files one by one in a loop yourself
+- Run the upload loop via Bash — do NOT upload files one by one yourself
 
 ---
 
 ## Step 1 — Get API Key
 
-Check in this order:
+Check in order:
+1. Env var `$CUSTOMGPT_API_KEY`
+2. `.env` file — walk up from `$PWD` to `/` looking for a file containing `CUSTOMGPT_API_KEY=`
+3. Read `~/.claude/customgpt-config.json` and extract the `apiKey` field
 
-```bash
-# 1. Already-exported env var
-echo "${CUSTOMGPT_API_KEY:-}"
-
-# 2. .env file in current or parent directories
-dir="$PWD"
-while [ "$dir" != "/" ]; do
-  if [ -f "$dir/.env" ]; then
-    grep -E '^export\s+CUSTOMGPT_API_KEY=|^CUSTOMGPT_API_KEY=' "$dir/.env" \
-      | sed 's/^export\s*//' | sed 's/CUSTOMGPT_API_KEY=//' | tr -d '"'"'" | head -1
-    break
-  fi
-  dir=$(dirname "$dir")
-done
-
-# 3. Saved config file
-cat ~/.claude/customgpt-config.json 2>/dev/null
-```
-
-Priority: env var → `.env` file → saved config. Use the first non-empty value found as `$API_KEY`.
-
-If no key is found anywhere, ask the user:
+Use the first non-empty value. If none found, ask:
 > "Please provide your CustomGPT.ai API key. You can find it at https://app.customgpt.ai/profile#api-keys"
->
-> "You can also set it permanently by adding this to your shell profile or a `.env` file in your project:
-> `export CUSTOMGPT_API_KEY=your_key_here`"
 
-Once you have the key, save it for future use:
+Once you have the key, save it:
 ```bash
-mkdir -p ~/.claude
 echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.json
 ```
 
@@ -51,15 +29,7 @@ echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.json
 
 ## Step 2 — Get Folder to Index
 
-Ask the user:
-> "Which folder should I index? Enter an absolute path, or press Enter to use the current working directory."
-
-If no path given, use the current working directory (`$PWD`).
-
-Confirm the folder exists:
-```bash
-test -d "$FOLDER" && echo "exists" || echo "not found"
-```
+Ask the user which folder to index, or use `$PWD` if they don't specify. Confirm it exists.
 
 ---
 
@@ -72,63 +42,16 @@ curl -s -X POST "https://app.customgpt.ai/api/v1/projects" \
   -d "project_name=$(basename $FOLDER)&is_chat_active=1"
 ```
 
-Extract `data.id` from the JSON response — this is the `agent_id`.
-If the response has no `data.id`, show the user the error and stop.
+Extract `data.id` as `agent_id`. If missing, show the error and stop.
 
 ---
 
-## Step 4 — Find and Upload Files
+## Step 4 — Collect and Upload Files
 
-**4a. Collect files** (save to `/tmp/customgpt-files.txt`):
+Find eligible files (exclude `.git/`, `node_modules/`, `__pycache__/`, binaries, `.env`). Tell the user the count before uploading.
+
 ```bash
-find "$FOLDER" -type f \
-  -not -path "*/.git/*" \
-  -not -path "*/node_modules/*" \
-  -not -path "*/__pycache__/*" \
-  -not -path "*/.next/*" \
-  -not -path "*/dist/*" \
-  -not -path "*/build/*" \
-  -not -path "*/.cache/*" \
-  -not -path "*/vendor/*" \
-  -not -path "*/coverage/*" \
-  -not -name "*.pyc" \
-  -not -name "*.pyo" \
-  -not -name "*.class" \
-  -not -name "*.exe" \
-  -not -name "*.bin" \
-  -not -name "*.zip" \
-  -not -name "*.tar" \
-  -not -name "*.gz" \
-  -not -name "*.png" \
-  -not -name "*.jpg" \
-  -not -name "*.jpeg" \
-  -not -name "*.gif" \
-  -not -name "*.ico" \
-  -not -name "*.webp" \
-  -not -name "*.svg" \
-  -not -name "*.mp3" \
-  -not -name "*.mp4" \
-  -not -name "*.mov" \
-  -not -name "*.woff" \
-  -not -name "*.woff2" \
-  -not -name "*.ttf" \
-  -not -name "*.lock" \
-  -not -name ".DS_Store" \
-  -not -name ".env" \
-  -not -name ".env.*" \
-  > /tmp/customgpt-files.txt
-
-wc -l < /tmp/customgpt-files.txt
-```
-
-Tell the user how many files were found before uploading.
-
-**4b. Run upload loop** (variables are already set in the outer shell — no `sed` substitution needed):
-```bash
-UPLOADED=0
-FAILED=0
-TOTAL=$(wc -l < /tmp/customgpt-files.txt)
-
+UPLOADED=0; FAILED=0; TOTAL=$(wc -l < /tmp/customgpt-files.txt)
 while IFS= read -r FILE; do
   REL="${FILE#${FOLDER}/}"
   HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -142,7 +65,6 @@ while IFS= read -r FILE; do
     echo "FAILED [$HTTP]: $REL" >&2
   fi
 done < /tmp/customgpt-files.txt
-
 echo "Done — uploaded: $UPLOADED / $TOTAL, failed: $FAILED"
 ```
 
@@ -151,26 +73,18 @@ echo "Done — uploaded: $UPLOADED / $TOTAL, failed: $FAILED"
 ## Step 5 — Save Meta File
 
 Write `.customgpt-meta.json` to the indexed folder:
-```bash
-cat > "$FOLDER/.customgpt-meta.json" << EOF
+```json
 {
-  "agent_id": $AGENT_ID,
-  "agent_name": "$(basename $FOLDER)",
-  "indexed_folder": "$FOLDER",
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  "agent_id": <id>,
+  "agent_name": "<folder basename>",
+  "indexed_folder": "<absolute path>",
+  "created_at": "<ISO timestamp>"
 }
-EOF
-touch "$FOLDER/.customgpt-meta.json"
 ```
 
 ---
 
 ## Step 6 — Report
 
-Tell the user:
-> "Agent created successfully.
-> - Agent ID: {agent_id}
-> - Folder: {folder}
-> - Files uploaded: {N}
->
-> Use `/query-agent` to search it, or `/refresh-agent` to re-sync after changes."
+> "Agent created. ID: {agent_id} | Folder: {folder} | Files uploaded: {N}
+> Use `/query-agent` to search it or `/refresh-agent` to re-sync after changes."

@@ -1,6 +1,6 @@
 # update-folders
 
-Change which folder is indexed for an existing agent. Deletes all current pages from the agent and re-indexes the new folder selection.
+Change which folder is indexed for an existing agent. Deletes all current pages and re-indexes the new folder.
 
 ## Critical Rules
 - ALWAYS read `.customgpt-meta.json` before doing anything
@@ -12,92 +12,55 @@ Change which folder is indexed for an existing agent. Deletes all current pages 
 
 ## Step 1 — Get API Key
 
+Check in order:
+1. Env var `$CUSTOMGPT_API_KEY`
+2. `.env` file — walk up from `$PWD` to `/` looking for a file containing `CUSTOMGPT_API_KEY=`
+3. Read `~/.claude/customgpt-config.json` and extract the `apiKey` field
+
+Use the first non-empty value. If none found, ask the user then save:
 ```bash
-# 1. Already-exported env var
-echo "${CUSTOMGPT_API_KEY:-}"
-
-# 2. .env file in current or parent directories
-dir="$PWD"
-while [ "$dir" != "/" ]; do
-  if [ -f "$dir/.env" ]; then
-    grep -E '^export\s+CUSTOMGPT_API_KEY=|^CUSTOMGPT_API_KEY=' "$dir/.env" \
-      | sed 's/^export\s*//' | sed 's/CUSTOMGPT_API_KEY=//' | tr -d '"'"'" | head -1
-    break
-  fi
-  dir=$(dirname "$dir")
-done
-
-# 3. Saved config file
-cat ~/.claude/customgpt-config.json 2>/dev/null
-```
-
-Priority: env var → `.env` file → saved config. Use the first non-empty value found as `$API_KEY`. If missing, ask the user for it and save:
-```bash
-mkdir -p ~/.claude && echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.json
+echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.json
 ```
 
 ---
 
 ## Step 2 — Read Existing Meta
 
-Find `.customgpt-meta.json` by walking up from the current directory:
-```bash
-dir="$PWD"
-while [ "$dir" != "/" ]; do
-  [ -f "$dir/.customgpt-meta.json" ] && cat "$dir/.customgpt-meta.json" && break
-  dir=$(dirname "$dir")
-done
-```
+Walk up from `$PWD` to find `.customgpt-meta.json`. Extract `agent_id` and `indexed_folder`.
 
-Extract `agent_id` and `indexed_folder`. If no meta file found, tell the user:
+If not found:
 > "No agent found. Run `/create-agent` first."
 
 ---
 
 ## Step 3 — Ask for New Folder
 
-Ask the user:
-> "Which folder should I index now? Enter an absolute path, or press Enter to keep the current folder: {current_folder}"
+> "Which folder should I index now? Press Enter to keep the current folder: {current_folder}"
 
-If no input, keep the existing folder.
-
-Confirm the folder exists:
-```bash
-test -d "$NEW_FOLDER" && echo "exists" || echo "not found"
-```
+If no input, keep the existing folder. Confirm the folder exists.
 
 ---
 
 ## Step 4 — Delete ALL Existing Pages
 
-Paginate through all pages and delete each one:
-
-Run directly in the current shell so `$API_KEY` and `$AGENT_ID` expand without `sed`:
 ```bash
-DELETED=0
-PAGE=1
-
+DELETED=0; PAGE=1
 while true; do
   RESP=$(curl -s \
     "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages?page=${PAGE}&per_page=100" \
     -H "Authorization: Bearer ${API_KEY}")
-
   IDS=$(echo "$RESP" | grep -o '"id":[0-9]*' | grep -o '[0-9]*')
-
   [ -z "$IDS" ] && break
-
   for ID in $IDS; do
     HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
       -X DELETE "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages/${ID}" \
       -H "Authorization: Bearer ${API_KEY}")
     [ "$HTTP" = "200" ] && DELETED=$((DELETED + 1))
   done
-
   COUNT=$(echo "$IDS" | wc -l)
   [ "$COUNT" -lt 100 ] && break
   PAGE=$((PAGE + 1))
 done
-
 echo "Deleted $DELETED pages"
 ```
 
@@ -105,37 +68,10 @@ echo "Deleted $DELETED pages"
 
 ## Step 5 — Upload New Folder
 
-**Collect files:**
+Collect eligible files from `$NEW_FOLDER` (same exclusion rules as `index-files`). Write paths to `/tmp/customgpt-files.txt`.
+
 ```bash
-find "$NEW_FOLDER" -type f \
-  -not -path "*/.git/*" \
-  -not -path "*/node_modules/*" \
-  -not -path "*/__pycache__/*" \
-  -not -path "*/.next/*" \
-  -not -path "*/dist/*" \
-  -not -path "*/build/*" \
-  -not -path "*/.cache/*" \
-  -not -path "*/vendor/*" \
-  -not -path "*/coverage/*" \
-  -not -name "*.pyc" -not -name "*.pyo" -not -name "*.class" \
-  -not -name "*.exe" -not -name "*.bin" -not -name "*.zip" \
-  -not -name "*.tar" -not -name "*.gz" \
-  -not -name "*.png" -not -name "*.jpg" -not -name "*.jpeg" \
-  -not -name "*.gif" -not -name "*.ico" -not -name "*.webp" \
-  -not -name "*.svg" -not -name "*.mp3" -not -name "*.mp4" \
-  -not -name "*.mov" -not -name "*.woff" -not -name "*.woff2" \
-  -not -name "*.ttf" -not -name "*.lock" \
-  -not -name ".DS_Store" -not -name ".env" -not -name ".env.*" \
-  > /tmp/customgpt-files.txt
-
-wc -l < /tmp/customgpt-files.txt
-```
-
-**Upload** (inline — no `sed` substitution needed):
-```bash
-UPLOADED=0
-FAILED=0
-
+UPLOADED=0; FAILED=0
 while IFS= read -r FILE; do
   REL="${FILE#${NEW_FOLDER}/}"
   HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -149,7 +85,6 @@ while IFS= read -r FILE; do
     echo "FAILED [$HTTP]: $REL" >&2
   fi
 done < /tmp/customgpt-files.txt
-
 echo "Done — uploaded: $UPLOADED, failed: $FAILED"
 ```
 
@@ -157,26 +92,12 @@ echo "Done — uploaded: $UPLOADED, failed: $FAILED"
 
 ## Step 6 — Update Meta File
 
-```bash
-cat > "$NEW_FOLDER/.customgpt-meta.json" << EOF
-{
-  "agent_id": $AGENT_ID,
-  "agent_name": "$(basename $NEW_FOLDER)",
-  "indexed_folder": "$NEW_FOLDER",
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-EOF
-touch "$NEW_FOLDER/.customgpt-meta.json"
-```
+Write updated `.customgpt-meta.json` to `$NEW_FOLDER` with the new `indexed_folder` value and current timestamp.
 
-If the folder changed, also remove the old meta file:
-```bash
-rm -f "$OLD_FOLDER/.customgpt-meta.json"
-```
+If the folder changed, remove the old `.customgpt-meta.json`.
 
 ---
 
 ## Step 7 — Report
 
-> "Done. Agent {agent_id} is now indexed from {new_folder}.
-> Uploaded: {N} files."
+> "Done. Agent {agent_id} is now indexed from {new_folder}. Uploaded: {N} files."

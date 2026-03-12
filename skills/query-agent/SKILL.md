@@ -5,65 +5,36 @@ Ask a plain-language question to the indexed project. Returns an AI answer with 
 ## Critical Rules
 - ALWAYS read `.customgpt-meta.json` to get the `agent_id`
 - Each call starts a fresh conversation (no session reuse)
-- Present the answer AND the sources clearly to the user
-- Let Claude decide how to incorporate the answer into the current task — do not just paste it blindly
+- Present the answer AND the sources clearly
 
 ---
 
 ## Step 1 — Get API Key
 
+Check in order:
+1. Env var `$CUSTOMGPT_API_KEY`
+2. `.env` file — walk up from `$PWD` to `/` looking for a file containing `CUSTOMGPT_API_KEY=`
+3. Read `~/.claude/customgpt-config.json` and extract the `apiKey` field
+
+Use the first non-empty value. If none found, ask the user then save:
 ```bash
-# 1. Already-exported env var
-echo "${CUSTOMGPT_API_KEY:-}"
-
-# 2. .env file in current or parent directories
-dir="$PWD"
-while [ "$dir" != "/" ]; do
-  if [ -f "$dir/.env" ]; then
-    grep -E '^export\s+CUSTOMGPT_API_KEY=|^CUSTOMGPT_API_KEY=' "$dir/.env" \
-      | sed 's/^export\s*//' | sed 's/CUSTOMGPT_API_KEY=//' | tr -d '"'"'" | head -1
-    break
-  fi
-  dir=$(dirname "$dir")
-done
-
-# 3. Saved config file
-cat ~/.claude/customgpt-config.json 2>/dev/null
-```
-
-Priority: env var → `.env` file → saved config. Use the first non-empty value found as `$API_KEY`. If missing, ask the user for it and save:
-```bash
-mkdir -p ~/.claude && echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.json
+echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.json
 ```
 
 ---
 
 ## Step 2 — Read Meta File
 
-Walk up from the current directory to find `.customgpt-meta.json`:
-```bash
-dir="$PWD"
-while [ "$dir" != "/" ]; do
-  [ -f "$dir/.customgpt-meta.json" ] && cat "$dir/.customgpt-meta.json" && break
-  dir=$(dirname "$dir")
-done
-```
+Walk up from `$PWD` to find `.customgpt-meta.json`. Extract `agent_id` and `indexed_folder`.
 
-Extract `agent_id`. If not found:
+If not found:
 > "No agent found in this directory tree. Run `/create-agent` first."
 
 ---
 
-## Step 3 — Check Freshness (Optional, Informational)
+## Step 3 — Check Freshness (Informational)
 
-Check if any files have changed since the last index:
-```bash
-find "$INDEXED_FOLDER" -newer "$INDEXED_FOLDER/.customgpt-meta.json" -type f \
-  -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/__pycache__/*" \
-  -not -name ".DS_Store" -not -name "*.pyc" 2>/dev/null | head -20
-```
-
-If changed files are found, inform the user:
+Check if any files in `indexed_folder` are newer than `.customgpt-meta.json`. If so, inform the user:
 > "Note: {N} files have changed since the last index. Run `/refresh-agent` for up-to-date results."
 
 Then continue with the query regardless.
@@ -72,8 +43,7 @@ Then continue with the query regardless.
 
 ## Step 4 — Get the Question
 
-If the user provided a question with the skill invocation, use it directly.
-Otherwise ask:
+If the user provided a question, use it. Otherwise ask:
 > "What would you like to know about the indexed project?"
 
 ---
@@ -87,7 +57,7 @@ curl -s -X POST "https://app.customgpt.ai/api/v1/projects/$AGENT_ID/conversation
   -d "name=Claude+Code+Query"
 ```
 
-Extract `data.session_id` from the response.
+Extract `data.session_id`.
 
 ---
 
@@ -101,22 +71,16 @@ curl -s -X POST "https://app.customgpt.ai/api/v1/projects/$AGENT_ID/conversation
   -d "stream=false"
 ```
 
-From the response extract:
-- `data.openai_response` — the answer text
-- `data.citations` — array of source citations (each has `title`, `url`, `document_name` or similar fields)
+Extract `data.openai_response` (the answer) and `data.citations` (sources).
 
 ---
 
 ## Step 7 — Present Results
 
-Show the answer and sources to the user:
-
 **Answer:**
 {openai_response}
 
 **Sources:**
-- {citation 1 title} — {citation 1 url or filename}
-- {citation 2 title} — {citation 2 url or filename}
-- ...
+- {citation title} — {citation url or filename}
 
-Then use the answer to help with whatever task the user is working on. If the answer is about code, read the referenced files to get full context before making changes.
+Use the answer to help with the current task. If it references code, read those files for full context before making changes.

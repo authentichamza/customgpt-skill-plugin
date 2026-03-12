@@ -27,40 +27,20 @@ Show the current status of a CustomGPT.ai agent: project metadata, chat availabi
 
 ## Step 1 — Get API Key
 
-```bash
-# 1. Already-exported env var
-echo "${CUSTOMGPT_API_KEY:-}"
+Check in order:
+1. Env var `$CUSTOMGPT_API_KEY`
+2. `.env` file — walk up from `$PWD` to `/` looking for a file containing `CUSTOMGPT_API_KEY=`
+3. Read `~/.claude/customgpt-config.json` and extract the `apiKey` field
 
-# 2. .env file in current or parent directories
-dir="$PWD"
-while [ "$dir" != "/" ]; do
-  if [ -f "$dir/.env" ]; then
-    grep -E '^export\s+CUSTOMGPT_API_KEY=|^CUSTOMGPT_API_KEY=' "$dir/.env" \
-      | sed 's/^export\s*//' | sed 's/CUSTOMGPT_API_KEY=//' | tr -d '"'"'" | head -1
-    break
-  fi
-  dir=$(dirname "$dir")
-done
-
-# 3. Saved config file
-cat ~/.claude/customgpt-config.json 2>/dev/null
-```
-
-Use the first non-empty value as `$API_KEY`. If missing, ask the user for it.
+Use the first non-empty value as `$API_KEY`. If none found, ask the user for it.
 
 ---
 
 ## Step 2 — Read Meta File
 
-```bash
-dir="$PWD"
-while [ "$dir" != "/" ]; do
-  [ -f "$dir/.customgpt-meta.json" ] && cat "$dir/.customgpt-meta.json" && break
-  dir=$(dirname "$dir")
-done
-```
+Walk up from `$PWD` to find `.customgpt-meta.json`. Extract `agent_id`.
 
-Extract `agent_id`. If not found:
+If not found:
 > "No agent found in this directory tree. Run `/create-agent` first."
 
 ---
@@ -74,11 +54,7 @@ curl -s --request GET \
   --header "accept: application/json"
 ```
 
-From the response extract:
-- `data.project_name`
-- `data.is_chat_active` — whether the chat bot is enabled
-- `data.type` — e.g. `SITEMAP`, `FILE`
-- `data.created_at`
+Extract: `data.project_name`, `data.is_chat_active`, `data.type`, `data.created_at`
 
 ---
 
@@ -91,15 +67,7 @@ curl -s --request GET \
   --header "accept: application/json"
 ```
 
-From the response extract:
-- `data.pages_found`
-- `data.pages_crawled`
-- `data.pages_indexed`
-- `data.total_words_indexed`
-- `data.crawl_credits_used`
-- `data.query_credits_used`
-- `data.total_queries`
-- `data.total_storage_credits_used`
+Extract: `data.pages_found`, `data.pages_crawled`, `data.pages_indexed`, `data.total_words_indexed`, `data.crawl_credits_used`, `data.query_credits_used`, `data.total_queries`, `data.total_storage_credits_used`
 
 ---
 
