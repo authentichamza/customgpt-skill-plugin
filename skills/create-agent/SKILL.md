@@ -1,3 +1,16 @@
+---
+description: Create a new CustomGPT.ai agent for a local folder and upload its files into the knowledge base.
+triggers:
+  - "create agent"
+  - "create a new agent"
+  - "new agent"
+  - "setup agent"
+  - "set up agent"
+  - "initialize agent"
+  - "create customgpt"
+  - "new customgpt agent"
+---
+
 # create-agent
 
 Create a CustomGPT.ai agent for a local folder and index its files into it.
@@ -6,7 +19,7 @@ Create a CustomGPT.ai agent for a local folder and index its files into it.
 - NEVER skip the API key check
 - ALWAYS save `.customgpt-meta.json` before reporting success
 - NEVER index `.git/`, `node_modules/`, `__pycache__/`, binary files, or `.env` files
-- Run the upload loop via Bash — do NOT upload files one by one yourself
+- Use `find` to collect eligible files, then upload each one with curl — Claude handles the iteration
 
 ---
 
@@ -36,55 +49,82 @@ Ask the user which folder to index, or use `$PWD` if they don't specify. Confirm
 ## Step 3 — Create the Agent
 
 ```bash
-curl -s -X POST "https://app.customgpt.ai/api/v1/projects" \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "project_name=$(basename $FOLDER)&is_chat_active=1"
+curl -s --request POST \
+  --url "https://app.customgpt.ai/api/v1/projects" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "Content-Type: application/x-www-form-urlencoded" \
+  --data "project_name=$(basename $FOLDER)&is_chat_active=1"
 ```
 
-Extract `data.id` as `agent_id`. If missing, show the error and stop.
+Read the response and extract `data.id` as `agent_id`. If missing, show the full response and stop.
 
 ---
 
-## Step 4 — Collect and Upload Files
-
-Find eligible files (exclude `.git/`, `node_modules/`, `__pycache__/`, binaries, `.env`). Tell the user the count before uploading.
+## Step 4 — Collect Eligible Files
 
 ```bash
-UPLOADED=0; FAILED=0; TOTAL=$(wc -l < /tmp/customgpt-files.txt)
-while IFS= read -r FILE; do
-  REL="${FILE#${FOLDER}/}"
-  HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
-    -H "Authorization: Bearer ${API_KEY}" \
-    -F "file=@${FILE};filename=${REL}")
-  if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
-    UPLOADED=$((UPLOADED + 1))
-  else
-    FAILED=$((FAILED + 1))
-    echo "FAILED [$HTTP]: $REL" >&2
-  fi
-done < /tmp/customgpt-files.txt
-echo "Done — uploaded: $UPLOADED / $TOTAL, failed: $FAILED"
+find "$FOLDER" -type f \
+  -not -path "*/.git/*" \
+  -not -path "*/node_modules/*" \
+  -not -path "*/__pycache__/*" \
+  -not -path "*/.next/*" \
+  -not -path "*/dist/*" \
+  -not -path "*/build/*" \
+  -not -path "*/.cache/*" \
+  -not -path "*/vendor/*" \
+  -not -path "*/coverage/*" \
+  -not -path "*/.venv/*" \
+  -not -path "*/venv/*" \
+  \( \
+    -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.jsx" \
+    -o -name "*.py" -o -name "*.go" -o -name "*.rb" -o -name "*.java" \
+    -o -name "*.cs" -o -name "*.cpp" -o -name "*.c" -o -name "*.h" \
+    -o -name "*.rs" -o -name "*.swift" -o -name "*.kt" -o -name "*.php" \
+    -o -name "*.sh" -o -name "*.bash" -o -name "*.zsh" \
+    -o -name "*.html" -o -name "*.css" -o -name "*.scss" \
+    -o -name "*.sql" -o -name "*.graphql" \
+    -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.toml" \
+    -o -name "*.xml" -o -name "*.ini" -o -name "*.cfg" -o -name "*.conf" \
+    -o -name "*.md" -o -name "*.mdx" -o -name "*.rst" -o -name "*.txt" \
+    -o -name "*.csv" -o -name "*.pdf" -o -name "*.docx" \
+  \)
 ```
+
+Read the list of files. Tell the user the count before uploading.
 
 ---
 
-## Step 5 — Save Meta File
+## Step 5 — Upload Each File
 
-Write `.customgpt-meta.json` to the indexed folder:
-```json
+For each file from Step 4, compute `REL` as the path relative to `$FOLDER`, then run:
+
+```bash
+curl -s --request POST \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --form "file=@${ABSOLUTE_PATH};filename=${REL}"
+```
+
+Read the HTTP status. HTTP 200 or 201 = success. Report each result as you go: `OK: {REL}` or `FAILED [{status}]: {REL}`.
+
+---
+
+## Step 6 — Save Meta File
+
+```bash
+cat > "${FOLDER}/.customgpt-meta.json" << EOF
 {
-  "agent_id": <id>,
-  "agent_name": "<folder basename>",
-  "indexed_folder": "<absolute path>",
-  "created_at": "<ISO timestamp>"
+  "agent_id": ${AGENT_ID},
+  "agent_name": "$(basename $FOLDER)",
+  "indexed_folder": "${FOLDER}",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
+EOF
 ```
 
 ---
 
-## Step 6 — Report
+## Step 7 — Report
 
-> "Agent created. ID: {agent_id} | Folder: {folder} | Files uploaded: {N}
+> "Agent created. ID: {agent_id} | Folder: {folder} | Uploaded: {N} / {total}, Failed: {F}
 > Use `/query-agent` to search it or `/refresh-agent` to re-sync after changes."

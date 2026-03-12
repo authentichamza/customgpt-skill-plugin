@@ -1,3 +1,16 @@
+---
+description: Change which folder is indexed for an existing CustomGPT.ai agent. Deletes all current pages and re-indexes from the new folder.
+triggers:
+  - "update folder"
+  - "update folders"
+  - "change folder"
+  - "change indexed folder"
+  - "switch folder"
+  - "index different folder"
+  - "change source folder"
+  - "update source"
+---
+
 # update-folders
 
 Change which folder is indexed for an existing agent. Deletes all current pages and re-indexes the new folder.
@@ -5,7 +18,7 @@ Change which folder is indexed for an existing agent. Deletes all current pages 
 ## Critical Rules
 - ALWAYS read `.customgpt-meta.json` before doing anything
 - ALWAYS delete ALL existing pages before uploading the new folder
-- Paginate the pages list — there may be more than 100 pages
+- Paginate the fetch loop — read `data.pages.last_page` to know when to stop
 - Update `.customgpt-meta.json` with the new folder after success
 
 ---
@@ -17,10 +30,7 @@ Check in order:
 2. `.env` file — walk up from `$PWD` to `/` looking for a file containing `CUSTOMGPT_API_KEY=`
 3. Read `~/.claude/customgpt-config.json` and extract the `apiKey` field
 
-Use the first non-empty value. If none found, ask the user then save:
-```bash
-echo '{"apiKey":"KEY_HERE"}' > ~/.claude/customgpt-config.json
-```
+Use the first non-empty value. If none found, ask the user.
 
 ---
 
@@ -37,67 +47,119 @@ If not found:
 
 > "Which folder should I index now? Press Enter to keep the current folder: {current_folder}"
 
-If no input, keep the existing folder. Confirm the folder exists.
+If no input, keep the existing folder. Confirm the folder exists on disk.
 
 ---
 
-## Step 4 — Delete ALL Existing Pages
+## Step 4 — Fetch All Page IDs
+
+Fetch page 1:
 
 ```bash
-DELETED=0; PAGE=1
-while true; do
-  RESP=$(curl -s \
-    "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages?page=${PAGE}&per_page=100" \
-    -H "Authorization: Bearer ${API_KEY}")
-  IDS=$(echo "$RESP" | grep -o '"id":[0-9]*' | grep -o '[0-9]*')
-  [ -z "$IDS" ] && break
-  for ID in $IDS; do
-    HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-      -X DELETE "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages/${ID}" \
-      -H "Authorization: Bearer ${API_KEY}")
-    [ "$HTTP" = "200" ] && DELETED=$((DELETED + 1))
-  done
-  COUNT=$(echo "$IDS" | wc -l)
-  [ "$COUNT" -lt 100 ] && break
-  PAGE=$((PAGE + 1))
-done
-echo "Deleted $DELETED pages"
+curl -s --request GET \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages?page=1&limit=100&order=asc" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "accept: application/json"
 ```
 
----
-
-## Step 5 — Upload New Folder
-
-Collect eligible files from `$NEW_FOLDER` (same exclusion rules as `index-files`). Write paths to `/tmp/customgpt-files.txt`.
+Read `data.pages.data[]` and collect all `id` values. Read `data.pages.last_page` — if greater than 1, repeat for each remaining page:
 
 ```bash
-UPLOADED=0; FAILED=0
-while IFS= read -r FILE; do
-  REL="${FILE#${NEW_FOLDER}/}"
-  HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
-    -H "Authorization: Bearer ${API_KEY}" \
-    -F "file=@${FILE};filename=${REL}")
-  if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
-    UPLOADED=$((UPLOADED + 1))
-  else
-    FAILED=$((FAILED + 1))
-    echo "FAILED [$HTTP]: $REL" >&2
-  fi
-done < /tmp/customgpt-files.txt
-echo "Done — uploaded: $UPLOADED, failed: $FAILED"
+curl -s --request GET \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages?page=${PAGE}&limit=100&order=asc" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "accept: application/json"
 ```
 
----
-
-## Step 6 — Update Meta File
-
-Write updated `.customgpt-meta.json` to `$NEW_FOLDER` with the new `indexed_folder` value and current timestamp.
-
-If the folder changed, remove the old `.customgpt-meta.json`.
+Collect all IDs across all pages before starting deletion.
 
 ---
 
-## Step 7 — Report
+## Step 5 — Delete Each Existing Page
 
-> "Done. Agent {agent_id} is now indexed from {new_folder}. Uploaded: {N} files."
+For each page ID collected in Step 4:
+
+```bash
+curl -s --request DELETE \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages/${PAGE_ID}" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "accept: application/json"
+```
+
+HTTP 200 = deleted. Report progress as you go.
+
+---
+
+## Step 6 — Collect Eligible Files from New Folder
+
+```bash
+find "$NEW_FOLDER" -type f \
+  -not -path "*/.git/*" \
+  -not -path "*/node_modules/*" \
+  -not -path "*/__pycache__/*" \
+  -not -path "*/.next/*" \
+  -not -path "*/dist/*" \
+  -not -path "*/build/*" \
+  -not -path "*/.cache/*" \
+  -not -path "*/vendor/*" \
+  -not -path "*/coverage/*" \
+  -not -path "*/.venv/*" \
+  -not -path "*/venv/*" \
+  \( \
+    -name "*.js" -o -name "*.ts" -o -name "*.tsx" -o -name "*.jsx" \
+    -o -name "*.py" -o -name "*.go" -o -name "*.rb" -o -name "*.java" \
+    -o -name "*.cs" -o -name "*.cpp" -o -name "*.c" -o -name "*.h" \
+    -o -name "*.rs" -o -name "*.swift" -o -name "*.kt" -o -name "*.php" \
+    -o -name "*.sh" -o -name "*.bash" -o -name "*.zsh" \
+    -o -name "*.html" -o -name "*.css" -o -name "*.scss" \
+    -o -name "*.sql" -o -name "*.graphql" \
+    -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.toml" \
+    -o -name "*.xml" -o -name "*.ini" -o -name "*.cfg" -o -name "*.conf" \
+    -o -name "*.md" -o -name "*.mdx" -o -name "*.rst" -o -name "*.txt" \
+    -o -name "*.csv" -o -name "*.pdf" -o -name "*.docx" \
+  \)
+```
+
+Tell the user the total file count before uploading.
+
+---
+
+## Step 7 — Upload Each File
+
+For each file, compute `REL` as its path relative to `$NEW_FOLDER`, then:
+
+```bash
+curl -s --request POST \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --form "file=@${ABSOLUTE_PATH};filename=${REL}"
+```
+
+HTTP 200 or 201 = success. Report each result: `OK: {REL}` or `FAILED [{status}]: {REL}`.
+
+---
+
+## Step 8 — Update Meta File
+
+Write updated `.customgpt-meta.json` to `$NEW_FOLDER`:
+
+```bash
+cat > "${NEW_FOLDER}/.customgpt-meta.json" << EOF
+{
+  "agent_id": ${AGENT_ID},
+  "agent_name": "$(basename $NEW_FOLDER)",
+  "indexed_folder": "${NEW_FOLDER}",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+```
+
+If the folder changed, remove the old `.customgpt-meta.json` from the previous location.
+
+---
+
+## Step 9 — Report
+
+> "Done. Agent {agent_id} is now indexed from {new_folder}.
+> - Deleted: {D} old pages
+> - Uploaded: {U} / {total} files, Failed: {F}"

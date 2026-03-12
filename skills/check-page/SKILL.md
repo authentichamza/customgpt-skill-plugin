@@ -56,14 +56,16 @@ If the user provided a filename or URL, use it. Otherwise ask:
 
 ## Step 4 — Paginate and Search
 
-Fetch pages 100 at a time, checking each entry's `filename` and `page_url` for a case-insensitive match against the search term. Stop when a match is found or `next_page_url` is null.
+Fetch pages 100 at a time, checking each entry's `filename` and `page_url` for a case-insensitive match against the search term. Stop when a match is found or `data.pages.last_page` is reached.
 
 ```bash
 curl -s --request GET \
-  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages?page=${PAGE}&per_page=100" \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages?page=${PAGE}&limit=100&order=asc" \
   --header "Authorization: Bearer ${API_KEY}" \
   --header "accept: application/json"
 ```
+
+Read `data.pages.data[]` — each entry has `id`, `filename`, `page_url`, `crawl_status`, `index_status`, `is_file`. Repeat for each page up to `data.pages.last_page`.
 
 Warn the user if more than 500 entries have been scanned with no match.
 
@@ -84,9 +86,10 @@ Warn the user if more than 500 entries have been scanned with no match.
 
 Status interpretations:
 - `crawl_status: queued` → not yet crawled
-- `crawl_status: crawled` + `index_status: queued` → crawled but not yet indexed
-- `crawl_status: crawled` + `index_status: indexed` → fully indexed
-- either `failed` → suggest `/refresh-agent`
+- `crawl_status: ok` + `index_status: queued` → crawled but not yet indexed
+- `crawl_status: ok` + `index_status: ok` → fully indexed and available
+- `crawl_status: limited` → plan limit reached, content partially crawled
+- either status `failed` → suggest `/reindex-file` for this document or `/refresh-agent` for a full re-sync
 
 **If not found:**
 > "No page matching '{search}' found. The file may not have been uploaded yet — run `/index-files` to add it."

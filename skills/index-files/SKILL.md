@@ -40,7 +40,7 @@ Index specific files, a directory, or the current folder into a CustomGPT.ai age
 - THIS SKILL UPLOADS FILES TO THE CUSTOMGPT.AI REST API VIA `curl` — it does NOT write to Claude's memory or use Read/Write/Edit for indexing
 - If `.customgpt-meta.json` is not found, auto-create the agent — do NOT stop or ask the user to run another skill
 - NEVER upload `.env`, `.env.*`, secrets, or binary files
-- Run the upload loop via Bash — do NOT upload files one by one yourself
+- Use `find` to collect eligible files, then upload each one with curl — Claude handles the iteration
 
 ---
 
@@ -68,13 +68,14 @@ If not found, inform the user and auto-create:
 Use the Git root (or `$PWD`) as the project folder. Agent name = folder basename.
 
 ```bash
-curl -s -X POST "https://app.customgpt.ai/api/v1/projects" \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "project_name=$(basename $PROJECT_FOLDER)&is_chat_active=1"
+curl -s --request POST \
+  --url "https://app.customgpt.ai/api/v1/projects" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "Content-Type: application/x-www-form-urlencoded" \
+  --data "project_name=$(basename $PROJECT_FOLDER)&is_chat_active=1"
 ```
 
-Extract `data.id` as `agent_id`. Save `.customgpt-meta.json` to the project folder.
+Read the response and extract `data.id` as `agent_id`. Save `.customgpt-meta.json` to the project folder.
 
 ---
 
@@ -82,7 +83,17 @@ Extract `data.id` as `agent_id`. Save `.customgpt-meta.json` to the project fold
 
 If the user specified files or directories, use those. Otherwise use `$PWD`.
 
-For directories, collect files recursively. For individual files, include them directly if their extension is in the whitelist.
+**Single file by name:** If the user gave just a filename (not a full path), search for it under `indexed_folder`:
+
+```bash
+find "$indexed_folder" -name "${FILENAME}" -type f
+```
+
+Use the first match. If not found, stop and tell the user.
+
+**Single file by path:** Resolve to absolute path and verify it exists. Check its extension against the whitelist — if not supported, stop and tell the user.
+
+**Directory:** Collect files recursively with `find` using the exclusions and whitelist below.
 
 ### Supported Extensions
 
@@ -98,35 +109,26 @@ Tell the user the file count before uploading.
 
 ---
 
-## Step 4 — Upload Files
+## Step 4 — Upload Each File
+
+For each eligible file, compute `REL` as its path relative to `indexed_folder` (strip the `indexed_folder/` prefix). Then run:
 
 ```bash
-UPLOADED=0; FAILED=0; TOTAL=$(wc -l < /tmp/customgpt-files.txt)
-while IFS= read -r FILE; do
-  [ -z "$FILE" ] && continue
-  REL="${FILE#${BASE_DIR}/}"
-  HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
-    -H "Authorization: Bearer ${API_KEY}" \
-    -F "file=@${FILE};filename=${REL}")
-  if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
-    UPLOADED=$((UPLOADED + 1))
-    echo "OK [$UPLOADED/$TOTAL]: $REL"
-  else
-    FAILED=$((FAILED + 1))
-    echo "FAILED [$HTTP]: $REL" >&2
-  fi
-done < /tmp/customgpt-files.txt
-echo "Done — uploaded: $UPLOADED / $TOTAL, failed: $FAILED"
+curl -s --request POST \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --form "file=@${ABSOLUTE_PATH};filename=${REL}"
 ```
 
-`$BASE_DIR` = `indexed_folder` from the meta file (used to compute relative paths).
+Read the HTTP status from the response. HTTP 200 or 201 = success. Report each result: `OK: {REL}` or `FAILED [{status}]: {REL}`.
 
 ---
 
 ## Step 5 — Update Freshness Timestamp
 
-Touch the `.customgpt-meta.json` file to reset the freshness timestamp.
+```bash
+touch "${META_FILE_PATH}"
+```
 
 ---
 

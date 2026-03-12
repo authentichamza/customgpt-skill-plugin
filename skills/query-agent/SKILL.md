@@ -1,3 +1,18 @@
+---
+description: Ask a plain-language question to the indexed CustomGPT.ai agent and get an AI answer with source citations.
+triggers:
+  - "query agent"
+  - "ask agent"
+  - "query the agent"
+  - "ask the agent"
+  - "search agent"
+  - "query customgpt"
+  - "ask customgpt"
+  - "search the index"
+  - "search indexed"
+  - "what does the agent know"
+---
+
 # query-agent
 
 Ask a plain-language question to the indexed project. Returns an AI answer with source citations.
@@ -51,27 +66,29 @@ If the user provided a question, use it. Otherwise ask:
 ## Step 5 — Create a Conversation Session
 
 ```bash
-curl -s -X POST "https://app.customgpt.ai/api/v1/projects/$AGENT_ID/conversations" \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "name=Claude+Code+Query"
+curl -s --request POST \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/conversations" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "Content-Type: application/x-www-form-urlencoded" \
+  --data "name=Claude+Code+Query"
 ```
 
-Extract `data.session_id`.
+Read the response and extract `data.session_id`.
 
 ---
 
 ## Step 6 — Send the Question
 
 ```bash
-curl -s -X POST "https://app.customgpt.ai/api/v1/projects/$AGENT_ID/conversations/$SESSION_ID/messages" \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  --data-urlencode "prompt=$QUESTION" \
-  -d "stream=false"
+curl -s --request POST \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/conversations/${SESSION_ID}/messages" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "prompt=${QUESTION}" \
+  --data "stream=false"
 ```
 
-Extract `data.openai_response` (the answer) and `data.citations` (sources).
+Read the response and extract `data.openai_response` (the answer) and `data.citations` (sources).
 
 ---
 

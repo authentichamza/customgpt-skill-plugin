@@ -1,3 +1,14 @@
+---
+description: Permanently delete a CustomGPT.ai agent and remove its local meta file.
+triggers:
+  - "delete agent"
+  - "remove agent"
+  - "destroy agent"
+  - "delete customgpt agent"
+  - "remove customgpt"
+  - "delete the agent"
+---
+
 # delete-agent
 
 Permanently delete a CustomGPT.ai agent and remove its local meta file.
@@ -41,17 +52,23 @@ If not confirmed:
 ## Step 4 — Delete the Agent
 
 ```bash
-curl -s -X DELETE "https://app.customgpt.ai/api/v1/projects/$AGENT_ID" \
-  -H "Authorization: Bearer $API_KEY"
+curl -s --request DELETE \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "accept: application/json"
 ```
 
-On failure, show the error and stop — do NOT remove the meta file.
+Read the response. On failure, show the error and stop — do NOT remove the meta file.
 
 ---
 
 ## Step 5 — Remove Meta File
 
-Delete the `.customgpt-meta.json` file found in Step 2.
+```bash
+rm "${META_FILE_PATH}"
+```
+
+Where `META_FILE_PATH` is the full path to the `.customgpt-meta.json` found in Step 2.
 
 ---
 
