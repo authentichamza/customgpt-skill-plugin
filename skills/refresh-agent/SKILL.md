@@ -72,11 +72,8 @@ This is informational only — refresh always re-syncs everything.
 
 ## Step 4 — Delete ALL Existing Pages
 
+Run directly in the current shell so `$API_KEY` and `$AGENT_ID` expand without `sed`:
 ```bash
-cat > /tmp/customgpt-delete-all.sh << 'DELETE_EOF'
-#!/bin/bash
-API_KEY="__API_KEY__"
-AGENT_ID="__AGENT_ID__"
 DELETED=0
 PAGE=1
 
@@ -102,12 +99,6 @@ while true; do
 done
 
 echo "Deleted $DELETED pages"
-DELETE_EOF
-
-sed -i "s|__API_KEY__|$API_KEY|g" /tmp/customgpt-delete-all.sh
-sed -i "s|__AGENT_ID__|$AGENT_ID|g" /tmp/customgpt-delete-all.sh
-chmod +x /tmp/customgpt-delete-all.sh
-bash /tmp/customgpt-delete-all.sh
 ```
 
 ---
@@ -140,18 +131,13 @@ find "$INDEXED_FOLDER" -type f \
 wc -l < /tmp/customgpt-files.txt
 ```
 
-**Upload:**
+**Upload** (inline — no `sed` substitution needed):
 ```bash
-cat > /tmp/customgpt-upload.sh << 'UPLOAD_EOF'
-#!/bin/bash
-API_KEY="__API_KEY__"
-AGENT_ID="__AGENT_ID__"
-FOLDER="__FOLDER__"
 UPLOADED=0
 FAILED=0
 
 while IFS= read -r FILE; do
-  REL="${FILE#${FOLDER}/}"
+  REL="${FILE#${INDEXED_FOLDER}/}"
   HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
     -H "Authorization: Bearer ${API_KEY}" \
@@ -165,13 +151,6 @@ while IFS= read -r FILE; do
 done < /tmp/customgpt-files.txt
 
 echo "Done — uploaded: $UPLOADED, failed: $FAILED"
-UPLOAD_EOF
-
-sed -i "s|__API_KEY__|$API_KEY|g" /tmp/customgpt-upload.sh
-sed -i "s|__AGENT_ID__|$AGENT_ID|g" /tmp/customgpt-upload.sh
-sed -i "s|__FOLDER__|$INDEXED_FOLDER|g" /tmp/customgpt-upload.sh
-chmod +x /tmp/customgpt-upload.sh
-bash /tmp/customgpt-upload.sh
 ```
 
 ---

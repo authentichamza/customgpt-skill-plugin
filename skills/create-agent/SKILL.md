@@ -123,13 +123,8 @@ wc -l < /tmp/customgpt-files.txt
 
 Tell the user how many files were found before uploading.
 
-**4b. Write and run upload script**:
+**4b. Run upload loop** (variables are already set in the outer shell — no `sed` substitution needed):
 ```bash
-cat > /tmp/customgpt-upload.sh << 'UPLOAD_EOF'
-#!/bin/bash
-API_KEY="__API_KEY__"
-AGENT_ID="__AGENT_ID__"
-FOLDER="__FOLDER__"
 UPLOADED=0
 FAILED=0
 TOTAL=$(wc -l < /tmp/customgpt-files.txt)
@@ -149,15 +144,6 @@ while IFS= read -r FILE; do
 done < /tmp/customgpt-files.txt
 
 echo "Done — uploaded: $UPLOADED / $TOTAL, failed: $FAILED"
-UPLOAD_EOF
-
-# Substitute real values
-sed -i "s|__API_KEY__|$API_KEY|g" /tmp/customgpt-upload.sh
-sed -i "s|__AGENT_ID__|$AGENT_ID|g" /tmp/customgpt-upload.sh
-sed -i "s|__FOLDER__|$FOLDER|g" /tmp/customgpt-upload.sh
-
-chmod +x /tmp/customgpt-upload.sh
-bash /tmp/customgpt-upload.sh
 ```
 
 ---

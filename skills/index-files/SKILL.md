@@ -226,12 +226,9 @@ Tell the user how many files will be uploaded before proceeding.
 
 ## Step 5 — Upload Files
 
+Run the upload loop directly in the current shell so that `$API_KEY`, `$AGENT_ID`, and `$BASE_DIR` are expanded by the shell before execution — no `sed` substitution needed, which avoids breakage when the API key contains characters like `|`, `/`, or `&`.
+
 ```bash
-cat > /tmp/customgpt-upload.sh << 'UPLOAD_EOF'
-#!/bin/bash
-API_KEY="__API_KEY__"
-AGENT_ID="__AGENT_ID__"
-BASE_DIR="__BASE_DIR__"
 UPLOADED=0
 FAILED=0
 TOTAL=$(wc -l < /tmp/customgpt-files.txt)
@@ -256,14 +253,6 @@ done < /tmp/customgpt-files.txt
 
 echo ""
 echo "Done — uploaded: $UPLOADED / $TOTAL, failed: $FAILED"
-UPLOAD_EOF
-
-sed -i "s|__API_KEY__|$API_KEY|g"     /tmp/customgpt-upload.sh
-sed -i "s|__AGENT_ID__|$AGENT_ID|g"   /tmp/customgpt-upload.sh
-sed -i "s|__BASE_DIR__|$BASE_DIR|g"   /tmp/customgpt-upload.sh
-
-chmod +x /tmp/customgpt-upload.sh
-bash /tmp/customgpt-upload.sh
 ```
 
 `$BASE_DIR` should be set to `indexed_folder` from the meta file (used to compute relative paths). If the files being indexed live outside that folder, use their common parent directory instead.
