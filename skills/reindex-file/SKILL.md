@@ -1,91 +1,103 @@
 ---
-description: Delete a specific file from the CustomGPT.ai agent and re-upload it from disk. Use when a single file has changed and needs to be refreshed without wiping the whole agent.
+name: customgpt-ai-rag:reindex-file
+description: Delete a specific file from the CustomGPT.ai agent and re-upload it from disk. Use when a single file has changed and you need to refresh it without a full re-sync.
+argument-hint: "[filename or path to refresh]"
+allowed-tools: Bash, Read
 triggers:
   - "reindex file"
   - "reindex this file"
   - "reindex specific file"
+  - "re-index file"
+  - "re-index this file"
   - "refresh file"
   - "refresh this file"
   - "refresh specific file"
   - "re-upload file"
+  - "re-upload this file"
   - "update file in agent"
   - "update indexed file"
-  - "re-index file"
-  - "re-index this file"
+  - "update this file in the index"
+  - "sync this file"
+  - "sync file"
 ---
 
 # reindex-file
 
-Find a specific file in the agent's knowledge base, delete it, then re-upload it from disk. Useful for refreshing a single changed file without doing a full `/refresh-agent`.
+Find a specific file in the agent's knowledge base, delete it, then re-upload the current version from disk. The surgical alternative to `/refresh-agent` — use this when only one or a few files have changed.
 
-## Critical Rules
+## Rules
+
 - ALWAYS read `.customgpt-meta.json` to get `agent_id` and `indexed_folder`
-- This skill chains three operations: find (list-pages), delete (delete-page), upload (index-files curl)
-- Match the file by `filename` using case-insensitive substring match
-- Confirm before deleting
-- Only the `/reindex` API endpoint works for URL-based documents — for uploaded files, always delete then re-upload
+- For uploaded files: delete then re-upload (the `/reindex` API endpoint only works for URL-based documents)
+- For URL-based documents: use the `/reindex` API endpoint directly
+- Match files by case-insensitive substring match against `filename` in the pages list
+- Confirm before deleting — the delete is irreversible
 
 ---
 
-## Step 1 — Get API Key
+## Step 1 — Resolve API Key
 
-Check in order:
-1. Env var `$CUSTOMGPT_API_KEY`
-2. `.env` file — walk up from `$PWD` to `/` looking for a file containing `CUSTOMGPT_API_KEY=`
-3. Read `~/.claude/customgpt-config.json` and extract the `apiKey` field
-
-Use the first non-empty value as `$API_KEY`. If none found, ask the user.
+Follow the lookup procedure in `skills/_shared/api-key.md`. Store the result as `$API_KEY`.
 
 ---
 
 ## Step 2 — Read Meta File
 
-Walk up from `$PWD` to find `.customgpt-meta.json`. Extract `agent_id` and `indexed_folder`.
+Walk up from `$PWD` toward `/`, looking for `.customgpt-meta.json`. Extract `agent_id`, `indexed_folder`. Store the full path as `$META_FILE_PATH`.
 
 If not found:
-> "No agent found in this directory tree. Run `/create-agent` first."
+> "No agent found in this directory tree. Run `/create-agent` to set one up first."
 
 ---
 
 ## Step 3 — Resolve the Target File
 
-If the user specified a file path or name, use it. Otherwise ask:
-> "Which file do you want to reindex? Provide a filename or path."
+If the user provided a filename or path, use it. Otherwise ask:
+> "Which file do you want to reindex? Provide a filename or relative path."
 
 Resolve to an absolute path:
+
 ```bash
-realpath "$TARGET" 2>/dev/null || echo "not found"
+realpath "$TARGET" 2>/dev/null
 ```
 
-Verify the file exists on disk. If not found, stop and tell the user.
+If that fails, search under `indexed_folder`:
+
+```bash
+find "$indexed_folder" -name "$(basename $TARGET)" -type f
+```
+
+Use the first match. If no match is found on disk, tell the user and stop.
 
 ---
 
-## Step 4 — Find the Page ID
+## Step 4 — Find the Page ID in the Agent
 
-Search the agent's page list for a document whose `filename` matches the target file (case-insensitive substring match against the basename).
+Search the agent's page list for a document whose `filename` contains the target filename as a case-insensitive substring.
+
+Fetch pages until a match is found or all pages are checked:
 
 ```bash
 curl -s --request GET \
-  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages?page=1&limit=100&order=asc" \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages?page=${PAGE}&limit=100&order=asc" \
   --header "Authorization: Bearer ${API_KEY}" \
   --header "accept: application/json"
 ```
 
-Read `data.pages.data[]` and match against the target filename. If not found on page 1, repeat for subsequent pages using `data.pages.last_page`.
+Match each entry's `filename` (case-insensitive, substring) against `$(basename $TARGET)`.
 
-If no match is found after checking all pages:
-> "File '{filename}' is not currently indexed. Uploading it now as a new document..."
-> Skip to Step 6.
+**If no match found after all pages:**
+> "'{filename}' is not currently indexed. Uploading it now as a new document..."
+> Skip directly to Step 6.
 
-If matched, note the `id` (page ID) and `filename`.
+**If matched:** note the `id` as `$PAGE_ID`, the `filename`, and `is_file`. For URL-based documents (`is_file: false`), go to Step 5b.
 
 ---
 
-## Step 5 — Delete the Existing Page
+## Step 5a — Delete the Existing File Page
 
 Confirm with the user:
-> "Found '{filename}' as page ID {PAGE_ID}. I will delete it and re-upload from disk. Continue? (yes/no)"
+> "Found '`{filename}`' as page ID {PAGE_ID}. I will delete it and re-upload `{target}` from disk. Continue? (yes/no)"
 
 ```bash
 curl -s --request DELETE \
@@ -94,26 +106,40 @@ curl -s --request DELETE \
   --header "accept: application/json"
 ```
 
-Read the response. On HTTP 200, proceed. On failure, stop and report the error.
+On HTTP 200, proceed to Step 6. On failure, show the error response and stop — do not attempt re-upload.
+
+---
+
+## Step 5b — Reindex URL-Based Document (alternative path)
+
+For URL-based documents (`is_file: false`), use the reindex endpoint instead of delete+upload:
+
+```bash
+curl -s --request POST \
+  --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/pages/${PAGE_ID}/reindex" \
+  --header "Authorization: Bearer ${API_KEY}" \
+  --header "accept: application/json"
+```
+
+Read the response. `data.updated: true` = reindex triggered successfully. Tell the user:
+> "Reindex triggered for URL document (page ID {PAGE_ID}). CustomGPT.ai will re-crawl the URL. Run `/check-page` in a moment to verify the new index status."
+
+Then skip to Step 7 (update freshness) and Step 8 (report).
 
 ---
 
 ## Step 6 — Re-Upload the File
 
-Compute the relative path from `indexed_folder` to use as the filename in the upload:
+Compute `REL` as the file path relative to `indexed_folder`:
 
 ```bash
 curl -s --request POST \
   --url "https://app.customgpt.ai/api/v1/projects/${AGENT_ID}/sources" \
   --header "Authorization: Bearer ${API_KEY}" \
-  --form "file=@${ABSOLUTE_FILE_PATH};filename=${RELATIVE_PATH}"
+  --form "file=@${ABSOLUTE_FILE_PATH};filename=${REL}"
 ```
 
-Where `RELATIVE_PATH` is the file path relative to `indexed_folder` (e.g. `skills/index-files/SKILL.md`).
-
-Read the response:
-- HTTP 200 or 201 → upload succeeded, note the new page ID from `data.id` if present
-- Any other status → report the error
+HTTP 200 or 201 = success. On failure, report the error with the HTTP status and full response body.
 
 ---
 
@@ -127,8 +153,9 @@ touch "$META_FILE_PATH"
 
 ## Step 8 — Report
 
-> "Reindexed '{filename}':
-> - Deleted old page ID {PAGE_ID}
-> - Uploaded new copy (HTTP {status})
+> **Reindexed `{filename}`**
 >
-> Run `/check-page {filename}` to verify the index status."
+> - Deleted old page ID: {PAGE_ID}
+> - Uploaded new copy: HTTP {status}
+>
+> Run `/check-page {filename}` to verify the new crawl and index status once processing completes.

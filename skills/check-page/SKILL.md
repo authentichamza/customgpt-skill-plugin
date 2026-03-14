@@ -1,62 +1,67 @@
 ---
-description: Check whether a specific file or URL was successfully crawled and indexed in a CustomGPT.ai agent by scanning all pages.
+name: customgpt-ai-rag:check-page
+description: Look up whether a specific file or URL was successfully crawled and indexed in the CustomGPT.ai agent. Returns status, page ID, and diagnostic guidance.
+argument-hint: "[filename or URL to look up]"
+allowed-tools: Bash, Read
 triggers:
   - "check page"
-  - "was indexed"
-  - "was crawled"
   - "find page"
+  - "lookup page"
   - "page status"
+  - "was indexed"
+  - "was this indexed"
+  - "was crawled"
   - "check if indexed"
   - "check if crawled"
   - "did it index"
   - "is this file indexed"
+  - "is this indexed"
   - "was this file crawled"
-  - "find this file"
-  - "lookup page"
+  - "find this file in the index"
+  - "look up this file"
+  - "check this file"
 ---
 
 # check-page
 
-Find a specific file or URL in a CustomGPT.ai agent's page list and report its crawl and index status.
+Find a specific file or URL in the agent's knowledge base and report its crawl and index status. Returns the page ID so you can reference it in `/delete-page` or `/reindex-file`.
 
-## Critical Rules
+## Rules
+
 - ALWAYS read `.customgpt-meta.json` to get `agent_id`
 - Match against BOTH `filename` (uploaded files) AND `page_url` (web sources)
-- Use case-insensitive substring matching — the user may give a partial name
-- Paginate until a match is found or there are no more pages
+- Use case-insensitive substring matching — the user may give a partial name or path segment
+- Paginate until a match is found or all pages are checked
 
 ---
 
-## Step 1 — Get API Key
+## Step 1 — Resolve API Key
 
-Check in order:
-1. Env var `$CUSTOMGPT_API_KEY`
-2. `.env` file — walk up from `$PWD` to `/` looking for a file containing `CUSTOMGPT_API_KEY=`
-3. Read `~/.claude/customgpt-config.json` and extract the `apiKey` field
-
-Use the first non-empty value. If none found, ask the user.
+Follow the lookup procedure in `skills/_shared/api-key.md`. Store the result as `$API_KEY`.
 
 ---
 
 ## Step 2 — Read Meta File
 
-Walk up from `$PWD` to find `.customgpt-meta.json`. Extract `agent_id`.
+Walk up from `$PWD` toward `/`, looking for `.customgpt-meta.json`. Extract `agent_id`.
 
 If not found:
-> "No agent found in this directory tree. Run `/create-agent` first."
+> "No agent found in this directory tree. Run `/create-agent` to set one up first."
 
 ---
 
 ## Step 3 — Get Search Term
 
-If the user provided a filename or URL, use it. Otherwise ask:
-> "Which file or URL do you want to look up?"
+If the user provided a filename, path segment, or URL with the command, use it.
+
+Otherwise ask:
+> "Which file or URL do you want to look up? You can provide a partial name."
 
 ---
 
-## Step 4 — Paginate and Search
+## Step 4 — Search by Paginating
 
-Fetch pages 100 at a time, checking each entry's `filename` and `page_url` for a case-insensitive match against the search term. Stop when a match is found or `data.pages.last_page` is reached.
+Fetch pages 100 at a time, checking each document's `filename` and `page_url` for a case-insensitive substring match against the search term. Stop as soon as a match is found.
 
 ```bash
 curl -s --request GET \
@@ -65,9 +70,9 @@ curl -s --request GET \
   --header "accept: application/json"
 ```
 
-Read `data.pages.data[]` — each entry has `id`, `filename`, `page_url`, `crawl_status`, `index_status`, `is_file`. Repeat for each page up to `data.pages.last_page`.
+For each entry in `data.pages.data[]`, check `filename` and `page_url` (both lowercased) against the lowercased search term.
 
-Warn the user if more than 500 entries have been scanned with no match.
+Continue through pages up to `data.pages.last_page`. If more than 500 entries have been scanned with no match, warn the user: "Scanned 500+ documents with no match. Try a more specific search term."
 
 ---
 
@@ -75,21 +80,35 @@ Warn the user if more than 500 entries have been scanned with no match.
 
 **If found:**
 
-> **Page found:** {filename or page_url}
+> **Found:** `{filename or page_url}`
 >
 > | Field | Value |
 > |---|---|
-> | ID | {id} |
+> | Page ID | {id} |
+> | Type | {is_file ? "uploaded file" : "URL"} |
 > | Crawl status | {crawl_status} |
 > | Index status | {index_status} |
 > | Created | {created_at} |
 
-Status interpretations:
-- `crawl_status: queued` → not yet crawled
-- `crawl_status: ok` + `index_status: queued` → crawled but not yet indexed
-- `crawl_status: ok` + `index_status: ok` → fully indexed and available
-- `crawl_status: limited` → plan limit reached, content partially crawled
-- either status `failed` → suggest `/reindex-file` for this document or `/refresh-agent` for a full re-sync
+**Status guidance:**
+
+| Crawl | Index | Meaning |
+|-------|-------|---------|
+| `queued` | any | Not yet crawled — indexing is in progress |
+| `ok` | `queued` | Crawled successfully, waiting to be indexed |
+| `ok` | `ok` | Fully indexed and available for queries |
+| `limited` | any | Plan limit reached — content was partially processed |
+| `failed` | any | Crawl failed — see below |
+| any | `failed` | Indexing failed — see below |
+
+If either status is `failed`:
+> "This document failed to process. Try `/reindex-file {filename}` to delete and re-upload it. If it continues to fail, check that the file format is supported and the file is not corrupted."
+
+If status is `limited`:
+> "Your plan limit was reached while processing this document. Upgrade your CustomGPT.ai plan at https://app.customgpt.ai/billing to process more content."
 
 **If not found:**
-> "No page matching '{search}' found. The file may not have been uploaded yet — run `/index-files` to add it."
+
+> "No document matching '{search_term}' found in the knowledge base."
+> "If you uploaded this file recently, it may still be processing — run `/check-status` to see overall progress, or `/list-pages` to browse all indexed documents."
+> "To add this file, run `/index-files {filename}`."
